@@ -1,40 +1,50 @@
 // std
-use std::str::FromStr;
+#[cfg(test)] use std::fmt::{Formatter, Result as FmtResult};
 // crates.io
-#[cfg(test)] use bitcoin::hashes::Hash;
-use bitcoin::Txid;
+use bitcoin::OutPoint;
 // self
 use crate::prelude::*;
 
-pub type Amount = u64;
+pub type Satoshi = u64;
 #[test]
 fn max_btc_in_u64_should_work() {
-	let max_u64 = Amount::MAX;
+	let max_u64 = Satoshi::MAX;
 	let max_btc = 21_000_000_u64 * 100_000_000;
 
 	assert!(max_u64 > max_btc);
 }
 
-pub type ChainId = u32;
+pub type Id = u32;
 pub type Index = u32;
 
 #[cfg_attr(test, derive(PartialEq))]
-#[derive(Debug)]
+#[cfg_attr(not(test), derive(Debug))]
 pub struct Utxo {
-	pub txid: Txid,
-	pub value: Amount,
-	pub vout: Index,
+	pub outpoint: OutPoint,
+	pub value: Satoshi,
 }
 #[cfg(test)]
-impl Default for Utxo {
-	fn default() -> Self {
-		Self { txid: Txid::from_raw_hash(Hash::all_zeros()), value: 0, vout: 0 }
+impl Utxo {
+	pub(crate) fn new(value: Satoshi) -> Self {
+		Self { value, outpoint: OutPoint { txid: Txid::all_zeros(), vout: 0 } }
+	}
+}
+#[cfg(test)]
+impl Debug for Utxo {
+	fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+		f.debug_struct("Utxo").field("value", &self.value).finish()
 	}
 }
 impl TryFrom<crate::api::mempool::Utxo> for Utxo {
 	type Error = Error;
 
 	fn try_from(value: crate::api::mempool::Utxo) -> Result<Self> {
-		Ok(Self { txid: Txid::from_str(&value.txid)?, value: value.value, vout: value.vout })
+		Ok(Self {
+			outpoint: OutPoint {
+				txid: value.txid.parse().map_err(BitcoinError::HexToArray)?,
+				vout: value.vout,
+			},
+			value: value.value,
+		})
 	}
 }

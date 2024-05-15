@@ -1,13 +1,15 @@
 // crates.io
+use bitcoin::Txid;
 use serde::Deserialize;
 // self
 use super::*;
+use crate::relayer::FeeStrategy;
 
 #[derive(Debug, Deserialize)]
 pub struct Utxo {
 	pub status: Status,
 	pub txid: String,
-	pub value: Amount,
+	pub value: Satoshi,
 	pub vout: Index,
 }
 #[derive(Debug, Deserialize)]
@@ -18,32 +20,52 @@ pub struct Status {
 	pub confirmed: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Fees {
+	pub economy_fee: Satoshi,
+	pub fastest_fee: Satoshi,
+	pub half_hour_fee: Satoshi,
+	pub hour_fee: Satoshi,
+	pub minimum_fee: Satoshi,
+}
+impl Fees {
+	pub fn of(&self, strategy: FeeStrategy) -> Satoshi {
+		match strategy {
+			FeeStrategy::Economy => self.economy_fee,
+			FeeStrategy::Fastest => self.fastest_fee,
+			FeeStrategy::HalfHour => self.half_hour_fee,
+			FeeStrategy::Hour => self.hour_fee,
+			FeeStrategy::Minimum => self.minimum_fee,
+		}
+	}
+}
+
 impl Api {
-	pub async fn get_utxos(&self, address: &str) -> Result<Vec<Utxo>> {
-		let utxos = self
-			.http
-			.get(&format!("https://mempool.space/testnet/api/address/{address}/utxo"))
-			.send()
-			.await?
-			.json::<Vec<Utxo>>()
-			.await?;
+	pub async fn get_utxos<S>(&self, address: S) -> Result<Vec<Utxo>>
+	where
+		S: AsRef<str>,
+	{
+		let utxos =
+			self.get_with_reties(&format!("address/{}/utxo", address.as_ref()), 3, 50).await?;
 
 		tracing::debug!("{utxos:?}");
 
 		Ok(utxos)
 	}
 
-	// pub async fn get_txs(&self, address: &str) -> Result<()> {
-	// 	let resp = self
-	// 		.http
-	// 		.get(&format!("https://mempool.space/testnet/api/address/{address}/txs/chain"))
-	// 		.send()
-	// 		.await?
-	// 		.json::<serde_json::Value>()
-	// 		.await?;
+	pub async fn get_recommended_fee(&self) -> Result<Fees> {
+		let fees = self.get_with_reties("v1/fees/recommended", 3, 50).await?;
 
-	// 	dbg!(resp);
+		tracing::debug!("{fees:?}");
 
-	// 	Ok(())
-	// }
+		Ok(fees)
+	}
+
+	pub async fn broadcast<S>(&self, tx_hex: S) -> Result<Txid>
+	where
+		S: Into<String>,
+	{
+		self.post_with_retries("tx", tx_hex.into(), 3, 50).await
+	}
 }
