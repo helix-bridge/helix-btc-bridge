@@ -35,4 +35,6 @@ pub enum BitcoinError {
 	HexToArray(#[from] bitcoin::hex::HexToArrayError),
 	#[error(transparent)]
 	Parse(#[from] bitcoin::address::ParseError),
+	#[error(transparent)]
+	SigHashTapRoot(#[from] bitcoin::sighash::TaprootError),
 }

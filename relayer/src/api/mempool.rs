@@ -1,5 +1,4 @@
 // crates.io
-use bitcoin::Txid;
 use serde::Deserialize;
 // self
 use super::*;
@@ -7,18 +6,18 @@ use crate::relayer::FeeStrategy;
 
 #[derive(Debug, Deserialize)]
 pub struct Utxo {
-	pub status: Status,
+	// pub status: Status,
 	pub txid: String,
 	pub value: Satoshi,
 	pub vout: Index,
 }
-#[derive(Debug, Deserialize)]
-pub struct Status {
-	pub block_hash: String,
-	pub block_height: u32,
-	pub block_time: u64,
-	pub confirmed: bool,
-}
+// #[derive(Debug, Deserialize)]
+// pub struct Status {
+// 	pub block_hash: String,
+// 	pub block_height: u32,
+// 	pub block_time: u64,
+// 	pub confirmed: bool,
+// }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,8 +45,10 @@ impl Api {
 	where
 		S: AsRef<str>,
 	{
-		let utxos =
-			self.get_with_reties(&format!("address/{}/utxo", address.as_ref()), 3, 50).await?;
+		let utxos = self
+			.get_with_reties(&format!("address/{}/utxo", address.as_ref()), 3, 50)
+			.await?
+			.json::<Vec<Utxo>>()?;
 
 		tracing::debug!("{utxos:?}");
 
@@ -55,17 +56,17 @@ impl Api {
 	}
 
 	pub async fn get_recommended_fee(&self) -> Result<Fees> {
-		let fees = self.get_with_reties("v1/fees/recommended", 3, 50).await?;
+		let fees = self.get_with_reties("v1/fees/recommended", 3, 50).await?.json::<Fees>()?;
 
 		tracing::debug!("{fees:?}");
 
 		Ok(fees)
 	}
 
-	pub async fn broadcast<S>(&self, tx_hex: S) -> Result<Txid>
+	pub async fn broadcast<S>(&self, tx_hex: S) -> Result<String>
 	where
 		S: Into<String>,
 	{
-		self.post_with_retries("tx", tx_hex.into(), 3, 50).await
+		Ok(self.post_with_retries("tx", tx_hex.into(), 3, 50).await?.text())
 	}
 }

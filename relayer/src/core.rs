@@ -5,15 +5,19 @@ use bitcoin::{
 		transaction::{Transaction, Version},
 	},
 	consensus,
-	key::Keypair,
+	key::{Keypair, TapTweak},
 	opcodes::all::OP_RETURN,
 	script::PushBytesBuf,
-	secp256k1::{Message, Secp256k1},
-	sighash::SighashCache,
-	Address, Amount, EcdsaSighashType, Network, PublicKey, Script, TxIn, TxOut,
+	secp256k1::{All, Message, Secp256k1},
+	sighash::{Prevouts, SighashCache},
+	taproot::Signature,
+	Address, Amount, Network, Script, ScriptBuf, TapSighashType, TxIn, TxOut, Witness,
 };
+use once_cell::sync::Lazy;
 // self
 use crate::{prelude::*, relayer::FeeConf};
+
+pub static SECP256K1: Lazy<Secp256k1<All>> = Lazy::new(Secp256k1::new);
 
 #[derive(Debug)]
 pub struct XTxBuilder<'a, E> {
@@ -25,12 +29,16 @@ pub struct XTxBuilder<'a, E> {
 	pub x_target: XTarget<E>,
 }
 impl<E> XTxBuilder<'_, E> {
+	const LOCK_TIME: LockTime = LockTime::ZERO;
+	const VERSION: Version = Version::TWO;
+
 	pub async fn build(self) -> Result<String>
 	where
 		E: AsRef<[u8]>,
 	{
 		let Self { amount, fee_conf, sender, network, recipient, x_target } = self;
-		let sender_addr = Address::p2pkh(PublicKey::new(sender.public_key()), network);
+		let (sender_pk, _) = sender.x_only_public_key();
+		let sender_addr = Address::p2tr(&SECP256K1, sender_pk, None, network);
 		let recipient_addr = util::addr_from_str(recipient, network)?;
 		let mark = x_target.encode()?;
 		let utxos = Api::acquire()
@@ -50,7 +58,7 @@ impl<E> XTxBuilder<'_, E> {
 		let mut input_count = 1;
 		let (utxos, input, output, fee) = loop {
 			// Assume there is always a transfer output, a charge output, and a mark output.
-			let fee = util::estimate_tx_size(input_count, 3) * fee_rate;
+			let fee = util::estimate_tx_size(input_count, 2) * fee_rate;
 			let spent = amount + fee;
 			let (utxos_amount, utxos) =
 				util::select_utxos(&utxos, spent).ok_or(Error::InsufficientFunds {
@@ -63,7 +71,7 @@ impl<E> XTxBuilder<'_, E> {
 				let input = utxos
 					.iter()
 					.map(|u| TxIn { previous_output: u.outpoint, ..Default::default() })
-					.collect();
+					.collect::<Vec<_>>();
 				let mut output = vec![
 					TxOut {
 						script_pubkey: recipient_addr.script_pubkey(),
@@ -93,38 +101,46 @@ impl<E> XTxBuilder<'_, E> {
 
 		tracing::info!("fee: {fee}");
 
-		let script_pubkey = sender_addr.script_pubkey();
-		let secp = Secp256k1::new();
-		let sender_sk = sender.secret_key();
-		let sender_pk = sender.public_key();
-		let mut tx =
-			Transaction { version: Version::TWO, lock_time: LockTime::ZERO, input, output };
+		let unsigned_tx = Transaction {
+			version: Self::VERSION,
+			lock_time: Self::LOCK_TIME,
+			input,
+			output: output.clone(),
+		};
 
-		for i in 0..utxos.len() {
-			let sig_hash = SighashCache::new(&tx)
-				.legacy_signature_hash(i, &script_pubkey, EcdsaSighashType::All as _)
-				.unwrap();
-			let msg = Message::from_digest_slice(sig_hash.as_ref())?;
-			let sig = secp.sign_ecdsa(&msg, &sender_sk);
-			let mut sig_script = sig.serialize_der().to_vec();
+		tracing::debug!("{unsigned_tx:?}");
 
-			sig_script.push(EcdsaSighashType::All as _);
+		let sighash_type = TapSighashType::AllPlusAnyoneCanPay;
+		let sender_spk = ScriptBuf::new_p2tr(&SECP256K1, sender_pk, None);
+		let mut hasher = SighashCache::new(unsigned_tx);
 
-			let script_sig = Script::builder()
-				.push_slice(PushBytesBuf::try_from(sig_script).unwrap())
-				.push_slice(sender_pk.serialize())
-				.into_script();
+		for (i, utxo) in utxos.into_iter().enumerate() {
+			let sighash = hasher
+				.taproot_key_spend_signature_hash(
+					i,
+					&Prevouts::One(
+						i,
+						TxOut {
+							script_pubkey: sender_spk.clone(),
+							value: Amount::from_sat(utxo.value),
+						},
+					),
+					sighash_type,
+				)
+				.map_err(BitcoinError::SigHashTapRoot)?;
+			let msg = Message::from_digest_slice(sighash.as_ref())?;
+			let sig = SECP256K1.sign_schnorr(&msg, &sender.tap_tweak(&SECP256K1, None).to_inner());
+			let sig = Signature { signature: sig, sighash_type };
 
-			tx.input[i].script_sig = script_sig;
+			*hasher.witness_mut(i).unwrap() = Witness::p2tr_key_spend(&sig);
 		}
 
-		tracing::debug!("{tx:?}");
+		let tx = hasher.into_transaction();
+		let tx_hex = array_bytes::bytes2hex("", consensus::serialize(&tx));
 
-		let tx = array_bytes::bytes2hex("", consensus::serialize(&tx));
+		tracing::info!("xtx hex: {tx_hex}");
 
-		tracing::info!("xtx hex: {tx}");
-
-		Ok(tx)
+		Ok(tx_hex)
 	}
 }
 #[derive(Debug)]
@@ -133,20 +149,22 @@ pub struct XTarget<E> {
 	pub entity: E,
 }
 impl<E> XTarget<E> {
+	const SIZE: usize = 80;
+	const SIZE_ENTITY: usize = Self::SIZE - Self::SIZE_ID;
+	const SIZE_ID: usize = 4;
+
 	fn encode(&self) -> Result<PushBytesBuf>
 	where
 		E: AsRef<[u8]>,
 	{
-		const MAX_ENTITY_SIZE: usize = 80 - 4;
-
 		let XTarget { id, entity } = self;
 		let entity = entity.as_ref();
 		let mut mark = [0; 80];
 
-		mark[..4].copy_from_slice(&id.to_le_bytes());
+		mark[..4].copy_from_slice(&id.encode());
 
-		if entity.len() > MAX_ENTITY_SIZE {
-			Err(Error::EntityTooLarge { max: MAX_ENTITY_SIZE, actual: entity.len() })?;
+		if entity.len() > Self::SIZE_ENTITY {
+			Err(Error::EntityTooLarge { max: Self::SIZE_ENTITY, actual: entity.len() })?;
 		}
 
 		mark[4..4 + entity.len()].copy_from_slice(entity);
@@ -157,5 +175,18 @@ impl<E> XTarget<E> {
 		buf.extend_from_slice(&mark).unwrap();
 
 		Ok(buf)
+	}
+}
+impl<'a> XTarget<&'a [u8; 76]> {
+	fn decode(s: &'a [u8]) -> Result<Self> {
+		let id = Id::decode(&s[..4])?;
+
+		if s[4..].len() != 76 {
+			Err(Error::EntityTooLarge { max: 76, actual: s[4..].len() })?;
+		}
+
+		let entity = array_bytes::slice2array_ref(&s[4..80]).map_err(Error::ArrayBytes)?;
+
+		Ok(Self { id, entity })
 	}
 }

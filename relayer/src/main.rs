@@ -25,10 +25,11 @@ async fn main() -> Result<()> {
 		sender: &c.keypair,
 		network: c.network,
 		recipient: "tb1pedlrf67ss52md29qqkzr2avma6ghyrt4jx9ecp9457qsl75x247shsh6th",
-		x_target: core::XTarget { id: 0, entity: [0; 32] },
+		x_target: core::XTarget { id: 0.into(), entity: [0; 32] },
 	}
 	.build()
 	.await?;
+
 	Api::acquire().broadcast(tx_hex).await?;
 
 	Ok(())

@@ -100,11 +100,10 @@ fn select_utxos_should_work() {
 	assert_eq!(select_utxos(&utxos, 7).unwrap(), [&utxos[3]]);
 }
 
-// TODO: currently, only work for p2pkh.
 pub fn estimate_tx_size(input_count: Satoshi, output_count: Satoshi) -> Satoshi {
 	const BASE_SIZE: Satoshi = 10;
-	const INPUT_SIZE: Satoshi = 148;
-	const OUTPUT_SIZE: Satoshi = 34;
+	const INPUT_SIZE: Satoshi = 65;
+	const OUTPUT_SIZE: Satoshi = 43;
 
 	BASE_SIZE + input_count * INPUT_SIZE + output_count * OUTPUT_SIZE
 }
