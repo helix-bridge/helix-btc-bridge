@@ -14,6 +14,7 @@ fn max_btc_in_u64_should_work() {
 	assert!(max_u64 > max_btc);
 }
 
+// pub type BlockNumber = u32;
 pub type Index = u32;
 
 #[derive(Clone, Copy, Debug)]
@@ -61,10 +62,10 @@ impl Debug for Utxo {
 		f.debug_struct("Utxo").field("value", &self.value).finish()
 	}
 }
-impl TryFrom<crate::api::mempool::Utxo> for Utxo {
+impl TryFrom<super::api::mempool::Utxo> for Utxo {
 	type Error = Error;
 
-	fn try_from(value: crate::api::mempool::Utxo) -> Result<Self> {
+	fn try_from(value: super::api::mempool::Utxo) -> Result<Self> {
 		Ok(Self {
 			outpoint: OutPoint {
 				txid: value.txid.parse().map_err(BitcoinError::HexToArray)?,

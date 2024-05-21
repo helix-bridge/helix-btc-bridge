@@ -1,8 +1,13 @@
-// self
-use crate::prelude::*;
+pub mod api;
+pub use api::*;
+
+pub mod chain;
+pub use chain::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+	#[error("{0:?}")]
+	Any(Box<dyn 'static + std::any::Any + Send>),
 	#[error(transparent)]
 	Io(#[from] std::io::Error),
 
@@ -21,12 +26,12 @@ pub enum Error {
 	#[error(transparent)]
 	Toml(#[from] toml::de::Error),
 
-	#[error("[relayer] insufficient funds: required {required}, available {available}")]
-	InsufficientFunds { required: Satoshi, available: Satoshi },
-	#[error("[relayer] entity size too large: maximum allowed {max}, actual size {actual}")]
-	EntityTooLarge { max: usize, actual: usize },
-	#[error("[relayer] max retries exceeded after {retries} attempts")]
-	ExceededMaxRetries { retries: u32 },
+	#[error(transparent)]
+	Api(#[from] ApiError),
+	#[error(transparent)]
+	Chain(#[from] ChainError),
+	#[error(transparent)]
+	ChainBtc(#[from] ChainBtcError),
 }
 
 #[derive(Debug, thiserror::Error)]

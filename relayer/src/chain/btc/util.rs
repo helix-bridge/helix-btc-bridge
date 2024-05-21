@@ -1,8 +1,9 @@
 // std
 use std::collections::HashMap;
 // crates.io
-use bitcoin::{address::NetworkUnchecked, Address, Network};
+use bitcoin::{address::NetworkUnchecked, Address, Amount, Network, VarInt};
 // self
+use super::*;
 use crate::prelude::*;
 
 pub fn addr_from_str(s: &str, network: Network) -> Result<Address> {
@@ -44,12 +45,12 @@ pub fn select_utxos(utxos: &[Utxo], target: Satoshi) -> Option<(Satoshi, Vec<&Ut
 			}
 		}
 
-		// println!("DP state after processing UTXO={utxo:?}: {dp:?}");
+		// dbg!("DP state after processing UTXO={utxo:?}: {dp:?}");
 	}
 
 	// Find the exact match or nearest bigger value.
 	if let Some(comb) = dp.get(&target) {
-		// println!("exact match found for target {target}: {comb:?}");
+		// dbg!("exact match found for target {target}: {comb:?}");
 
 		return Some((target, comb.to_owned()));
 	} else {
@@ -100,10 +101,45 @@ fn select_utxos_should_work() {
 	assert_eq!(select_utxos(&utxos, 7).unwrap(), [&utxos[3]]);
 }
 
-pub fn estimate_tx_size(input_count: Satoshi, output_count: Satoshi) -> Satoshi {
-	const BASE_SIZE: Satoshi = 10;
-	const INPUT_SIZE: Satoshi = 65;
-	const OUTPUT_SIZE: Satoshi = 43;
+pub fn estimate_tx_size(
+	input_count: Satoshi,
+	output_utxo_count: Satoshi,
+	extra: Satoshi,
+) -> (Satoshi, f64) {
+	let base =
+		// Version.
+		4
+		// Lock time.
+		+ 4
+		// SegWit flag.
+		// 2
+		// Input count.
+		+ VarInt::from(input_count).size() as Satoshi
+		// Inputs.
+		+ input_count
+			* (
+				// Base.
+				32 + 4 + 1 + 4
+				// Witness.
+				// + 64 + 1 + 1 + 1
+			)
+		// Output UTXO count.
+		+ VarInt::from(output_utxo_count).size() as Satoshi
+		// Output UTXOs.
+		+ output_utxo_count
+			// Base.
+			* (1 + 34 + Amount::SIZE as Satoshi)
+		// Extra.
+		+ extra;
+	let sigwit =
+		// SegWit flag.
+		2
+		// Inputs.
+		+ input_count
+			// Witness.
+			* (64 + 1 + 1 + 1);
+	let size = base + sigwit;
+	let v_size = (base * 3 + size) as f64 / 4.;
 
-	BASE_SIZE + input_count * INPUT_SIZE + output_count * OUTPUT_SIZE
+	(size, v_size)
 }
