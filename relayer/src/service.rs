@@ -1,9 +1,13 @@
 mod btc;
 
 // std
-use std::{fmt::Debug, thread, time::Duration};
+use std::{
+	fmt::Debug,
+	thread::{self, ScopedJoinHandle},
+	time::Duration,
+};
 // self
-use crate::{conf::Conf, prelude::*};
+use crate::{conf::*, prelude::*};
 
 trait Relayer
 where
@@ -27,7 +31,8 @@ where
 
 #[derive(Debug)]
 struct RelayerPool {
-	relayers: Vec<Box<dyn Relayer>>,
+	btc_relayer: btc::Relayer,
+	other_relayers: Vec<Box<dyn Relayer>>,
 }
 impl RelayerPool {
 	fn load() -> Result<Self> {
@@ -50,34 +55,24 @@ impl TryFrom<Conf> for RelayerPool {
 	type Error = Error;
 
 	fn try_from(value: Conf) -> Result<Self> {
-		Ok(Self { relayers: vec![Box::new(btc::Relayer::try_from(value.btc)?)] })
+		Ok(Self { btc_relayer: btc::Relayer::try_from(value.btc)?, other_relayers: Vec::new() })
 	}
 }
 
 pub fn run() -> Result<()> {
 	let pool = RelayerPool::load()?;
+	let RelayerPool { btc_relayer, other_relayers } = &pool;
 
 	thread::scope::<_, Result<()>>(|s| {
-		let mut handles =
-			pool.relayers.iter().map(|r| Some(s.spawn(move || r.start()))).collect::<Vec<_>>();
+		let mut btc_rt = Some(s.spawn(move || btc_relayer.start()));
+		let mut others_rt =
+			other_relayers.iter().map(|r| Some(s.spawn(move || r.start()))).collect::<Vec<_>>();
 
 		loop {
-			for (i, maybe_h) in handles.iter_mut().enumerate() {
-				let Some(h) = maybe_h else {
-					continue;
-				};
+			btc_rt = supervise(btc_relayer, btc_rt.take(), |r| s.spawn(|| r.start()))?;
 
-				if h.is_finished() {
-					let h = maybe_h.take().unwrap();
-
-					if let Err(e) = h.join().map_err(Error::Any)? {
-						let r = &pool.relayers[i];
-
-						tracing::error!("an error occurred while running {}: {e:?}", r.name());
-
-						*maybe_h = Some(s.spawn(|| r.start()));
-					}
-				}
+			for (i, t) in others_rt.iter_mut().enumerate() {
+				*t = supervise(&*other_relayers[i], t.take(), |r| s.spawn(|| r.start()))?;
 			}
 
 			thread::sleep(Duration::from_millis(200));
@@ -85,4 +80,26 @@ pub fn run() -> Result<()> {
 	})?;
 
 	Ok(())
+}
+
+fn supervise<'a, 'b, F>(
+	relayer: &'a dyn Relayer,
+	thread: Option<ScopedJoinHandle<'b, Result<()>>>,
+	restart_fn: F,
+) -> Result<Option<ScopedJoinHandle<'b, Result<()>>>>
+where
+	'a: 'b,
+	F: FnOnce(&'a dyn Relayer) -> ScopedJoinHandle<'b, Result<()>>,
+{
+	if let Some(t) = thread {
+		if t.is_finished() {
+			if let Err(e) = t.join().map_err(Error::Any)? {
+				tracing::error!("an error occurred while running {}: {e:?}", relayer.name());
+
+				return Ok(Some(restart_fn(relayer)));
+			}
+		}
+	}
+
+	Ok(None)
 }

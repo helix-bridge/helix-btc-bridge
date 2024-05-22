@@ -4,6 +4,9 @@ pub use api::*;
 pub mod chain;
 pub use chain::*;
 
+pub mod x;
+pub use x::*;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
 	#[error("{0:?}")]
@@ -31,7 +34,7 @@ pub enum Error {
 	#[error(transparent)]
 	Chain(#[from] ChainError),
 	#[error(transparent)]
-	ChainBtc(#[from] ChainBtcError),
+	X(#[from] XError),
 }
 
 #[derive(Debug, thiserror::Error)]

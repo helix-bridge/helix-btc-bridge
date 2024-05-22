@@ -14,7 +14,6 @@ use bitcoin::{
 	consensus,
 	key::{Keypair, TapTweak},
 	opcodes::all::OP_RETURN,
-	script::PushBytesBuf,
 	secp256k1::{All, Message, Secp256k1},
 	sighash::{Prevouts, SighashCache},
 	taproot::Signature,
@@ -22,32 +21,25 @@ use bitcoin::{
 };
 use once_cell::sync::Lazy;
 // self
-use crate::prelude::*;
-
-const X_TARGET_SIZE: usize = 80;
-const X_TARGET_ID_SIZE: usize = 4;
-const X_TARGET_ENTITY_SIZE: usize = X_TARGET_SIZE - X_TARGET_ID_SIZE;
+use crate::{prelude::*, x::*};
 
 static SECP256K1: Lazy<Secp256k1<All>> = Lazy::new(Secp256k1::new);
 
 #[derive(Debug)]
-pub struct XTxBuilder<'a, E> {
+pub struct XTxBuilder<'a> {
 	pub amount: Satoshi,
 	pub fee_rate: Satoshi,
 	pub network: Network,
 	pub sender: &'a TaprootKey,
 	pub recipient: &'a str,
 	pub utxos: &'a [Utxo],
-	pub x_target: XTarget<E>,
+	pub x_target: XTarget,
 }
-impl<E> XTxBuilder<'_, E> {
+impl XTxBuilder<'_> {
 	const LOCK_TIME: LockTime = LockTime::ZERO;
 	const VERSION: Version = Version::TWO;
 
-	pub fn build(self) -> Result<String>
-	where
-		E: AsRef<[u8]>,
-	{
+	pub fn build(self) -> Result<String> {
 		let Self { amount, fee_rate, sender, network, recipient, utxos, x_target } = self;
 		let recipient_addr = util::addr_from_str(recipient, network)?;
 		let mark = x_target.encode()?;
@@ -172,53 +164,5 @@ impl TaprootKey {
 		let script_public_key = address.script_pubkey();
 
 		Self { address: address.to_string(), keypair, script_public_key }
-	}
-}
-
-#[derive(Debug)]
-pub struct XTarget<E> {
-	pub id: Id,
-	pub entity: E,
-}
-impl<E> XTarget<E> {
-	fn encode(&self) -> Result<PushBytesBuf>
-	where
-		E: AsRef<[u8]>,
-	{
-		let XTarget { id, entity } = self;
-		let entity = entity.as_ref();
-		let mut mark = [0; X_TARGET_SIZE];
-
-		mark[..4].copy_from_slice(&id.encode());
-
-		if entity.len() > X_TARGET_ENTITY_SIZE {
-			Err(ChainBtcError::EntityTooLarge { max: X_TARGET_ENTITY_SIZE, actual: entity.len() })?;
-		}
-
-		mark[4..4 + entity.len()].copy_from_slice(entity);
-
-		let mut buf = PushBytesBuf::new();
-
-		// This is safe because the length of mark is always 80.
-		buf.extend_from_slice(&mark).unwrap();
-
-		Ok(buf)
-	}
-}
-impl<'a> XTarget<&'a [u8; X_TARGET_SIZE]> {
-	fn decode(s: &'a [u8]) -> Result<Self> {
-		let id = Id::decode(&s[..X_TARGET_ID_SIZE])?;
-
-		if s[X_TARGET_ID_SIZE..].len() != X_TARGET_ENTITY_SIZE {
-			Err(ChainBtcError::EntityTooLarge {
-				max: X_TARGET_ENTITY_SIZE,
-				actual: s[X_TARGET_ID_SIZE..].len(),
-			})?;
-		}
-
-		let entity = array_bytes::slice2array_ref(&s[X_TARGET_ID_SIZE..X_TARGET_SIZE])
-			.map_err(Error::ArrayBytes)?;
-
-		Ok(Self { id, entity })
 	}
 }

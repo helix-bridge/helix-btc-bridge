@@ -13,14 +13,14 @@ pub fn addr_from_str(s: &str, network: Network) -> Result<Address> {
 		.map_err(BitcoinError::Parse)?)
 }
 
-// Among various UTXO selection strategies such as First-In-First-Out (FIFO), Largest-First, Best
-// Fit, Minimum Subset Sum, and Random Selection, the "Minimum Subset Sum" strategy is chosen for
-// its specific advantages in handling small-value transactions. This strategy focuses on
-// efficiently utilizing smaller UTXOs, which is particularly beneficial for our primary business of
-// facilitating small transactions for users. By prioritizing the use of smaller UTXOs, it helps in
-// reducing the wallet's fragmentation and enhances the management of UTXO sets. This method not
-// only optimizes the transaction process by minimizing the input count and size but also improves
-// user satisfaction by effectively managing their resources.
+/// Among various UTXO selection strategies such as First-In-First-Out (FIFO), Largest-First, Best
+/// Fit, Minimum Subset Sum, and Random Selection, the "Minimum Subset Sum" strategy is chosen for
+/// its specific advantages in handling small-value transactions. This strategy focuses on
+/// efficiently utilizing smaller UTXOs, which is particularly beneficial for our primary business
+/// of facilitating small transactions for users. By prioritizing the use of smaller UTXOs, it helps
+/// in reducing the wallet's fragmentation and enhances the management of UTXO sets. This method not
+/// only optimizes the transaction process by minimizing the input count and size but also improves
+/// user satisfaction by effectively managing their resources.
 pub fn select_utxos(utxos: &[Utxo], target: Satoshi) -> Option<(Satoshi, Vec<&Utxo>)> {
 	let mut dp = <HashMap<Satoshi, Vec<&Utxo>>>::new();
 
@@ -86,19 +86,19 @@ fn select_utxos_should_work() {
 	assert!(select_utxos(&utxos, 4).is_none());
 
 	let utxos = vec![Utxo::new(1), Utxo::new(2)];
-	assert_eq!(select_utxos(&utxos, 3).unwrap(), [&utxos[0], &utxos[1]]);
+	assert_eq!(select_utxos(&utxos, 3).unwrap().1, [&utxos[0], &utxos[1]]);
 
 	let utxos = vec![Utxo::new(1), Utxo::new(2), Utxo::new(3)];
-	assert_eq!(select_utxos(&utxos, 3).unwrap(), [&utxos[0], &utxos[1]]);
+	assert_eq!(select_utxos(&utxos, 3).unwrap().1, [&utxos[0], &utxos[1]]);
 
 	let utxos = vec![Utxo::new(1), Utxo::new(1), Utxo::new(2), Utxo::new(4)];
-	assert_eq!(select_utxos(&utxos, 4).unwrap(), [&utxos[0], &utxos[1], &utxos[2]]);
+	assert_eq!(select_utxos(&utxos, 4).unwrap().1, [&utxos[0], &utxos[1], &utxos[2]]);
 
 	let utxos = vec![Utxo::new(1), Utxo::new(2), Utxo::new(3), Utxo::new(4)];
-	assert_eq!(select_utxos(&utxos, 5).unwrap(), [&utxos[1], &utxos[2]]);
+	assert_eq!(select_utxos(&utxos, 5).unwrap().1, [&utxos[1], &utxos[2]]);
 
 	let utxos = vec![Utxo::new(1), Utxo::new(2), Utxo::new(3), Utxo::new(9)];
-	assert_eq!(select_utxos(&utxos, 7).unwrap(), [&utxos[3]]);
+	assert_eq!(select_utxos(&utxos, 7).unwrap().1, [&utxos[3]]);
 }
 
 pub fn estimate_tx_size(

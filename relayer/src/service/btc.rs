@@ -1,13 +1,14 @@
 // crates.io
 use bitcoin::Network;
 use reqwest::ClientBuilder;
-use tokio::{runtime::Runtime, sync::mpsc};
+use tokio::runtime::Runtime;
 // self
 use crate::{
 	chain::btc::{api::mempool::Api, *},
 	conf::btc::*,
 	http::Client,
 	prelude::*,
+	x::*,
 };
 
 #[derive(Debug)]
@@ -21,6 +22,7 @@ impl Relayer {
 	const NAME: &'static str = "helix-btc-relayer";
 
 	// For testing.
+	#[allow(unused)]
 	async fn transfer(&self) -> Result<()> {
 		let Relayer { api, fee_conf, key, network } = self;
 		let fee_rate = api.get_recommended_fee().await?.of(fee_conf.strategy) + fee_conf.extra;
@@ -40,7 +42,7 @@ impl Relayer {
 			network: *network,
 			recipient: "tb1pedlrf67ss52md29qqkzr2avma6ghyrt4jx9ecp9457qsl75x247shsh6th",
 			utxos: utxos.as_slice(),
-			x_target: XTarget { id: 0.into(), entity: [0; 32] },
+			x_target: XTarget { id: 0_u32.into(), entity: [0; 32].into() },
 		}
 		.build()?;
 
@@ -49,11 +51,7 @@ impl Relayer {
 		Ok(())
 	}
 
-	async fn watch(&self) -> Result<()> {
-		loop {}
-
-		Ok(())
-	}
+	// async fn watch(&self) -> Result<()> {}
 }
 impl TryFrom<Conf> for Relayer {
 	type Error = Error;

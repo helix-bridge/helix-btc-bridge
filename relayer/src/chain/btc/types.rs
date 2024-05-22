@@ -1,7 +1,8 @@
 // std
-#[cfg(test)] use std::fmt::{Formatter, Result as FmtResult};
+#[cfg(test)] use std::fmt::{Debug, Formatter, Result as FmtResult};
 // crates.io
 use bitcoin::OutPoint;
+#[cfg(test)] use bitcoin::{hashes::Hash, Txid};
 // self
 use crate::prelude::*;
 
@@ -16,33 +17,6 @@ fn max_btc_in_u64_should_work() {
 
 // pub type BlockNumber = u32;
 pub type Index = u32;
-
-#[derive(Clone, Copy, Debug)]
-pub struct Id(pub u32);
-impl Id {
-	pub fn encode(self) -> [u8; 4] {
-		self.0.to_le_bytes()
-	}
-
-	pub fn decode<S>(s: S) -> Result<Self>
-	where
-		S: AsRef<[u8]>,
-	{
-		let s = s.as_ref();
-
-		array_bytes::slice_n_into(s).map_err(Error::ArrayBytes)
-	}
-}
-impl From<u32> for Id {
-	fn from(value: u32) -> Self {
-		Self(value)
-	}
-}
-impl From<[u8; 4]> for Id {
-	fn from(value: [u8; 4]) -> Self {
-		Self(u32::from_le_bytes(value))
-	}
-}
 
 #[cfg_attr(test, derive(PartialEq))]
 #[cfg_attr(not(test), derive(Debug))]
