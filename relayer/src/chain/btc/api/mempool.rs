@@ -104,67 +104,68 @@ where
 
 #[derive(Debug, Deserialize)]
 pub struct Tx {
-	// pub fee: Satoshi,
 	pub txid: String,
-	// pub locktime: BlockNumber,
-	// pub size: u32,
-	// pub status: Status,
 	// pub version: u8,
+	// pub locktime: BlockNumber,
 	// pub vin: Vec<Vin>,
 	pub vout: Vec<Vout>,
+	// pub size: u32,
 	// pub weight: u32,
+	// pub sigops: u32,
+	// pub fee: Satoshi,
+	// pub status: Status,
 }
 // #[derive(Debug, Deserialize)]
 // pub struct Vin {
+// 		pub txid: String,
+// 		pub vout: Index,
+// 		pub prevout: Vout,
+// 		pub scriptsig: String,
+// 		pub scriptsig_asm: String,
+// 		pub witness: Vec<String>,
 // 	pub is_coinbase: bool,
-// 	pub prevout: Vout,
-// 	pub scriptsig: String,
-// 	pub scriptsig_asm: String,
 // 	pub sequence: u32,
-// 	pub txid: String,
-// 	pub vout: Index,
-// 	pub witness: Vec<String>,
 // }
 #[derive(Debug, Deserialize)]
 pub struct Vout {
 	// 	pub scriptpubkey: String,
-	pub scriptpubkey_address: String,
 	pub scriptpubkey_asm: String,
 	// 	pub scriptpubkey_type: String,
+	pub scriptpubkey_address: Option<String>,
 	pub value: Satoshi,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Utxo {
-	pub status: Status,
 	pub txid: String,
-	pub value: Satoshi,
 	pub vout: Index,
+	pub status: Status,
+	pub value: Satoshi,
 }
 #[derive(Debug, Deserialize)]
 pub struct Status {
-	// 	pub block_hash: String,
-	// 	pub block_height: BlockNumber,
-	// 	pub block_time: u64,
 	pub confirmed: bool,
+	// 	pub block_height: BlockNumber,
+	// 	pub block_hash: String,
+	// 	pub block_time: u64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Fees {
-	pub economy_fee: Satoshi,
 	pub fastest_fee: Satoshi,
 	pub half_hour_fee: Satoshi,
 	pub hour_fee: Satoshi,
+	pub economy_fee: Satoshi,
 	pub minimum_fee: Satoshi,
 }
 impl Fees {
 	pub fn of(&self, strategy: FeeType) -> Satoshi {
 		match strategy {
-			FeeType::Economy => self.economy_fee,
 			FeeType::Fastest => self.fastest_fee,
 			FeeType::HalfHour => self.half_hour_fee,
 			FeeType::Hour => self.hour_fee,
+			FeeType::Economy => self.economy_fee,
 			FeeType::Minimum => self.minimum_fee,
 		}
 	}
@@ -173,10 +174,10 @@ impl Fees {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FeeType {
-	Economy,
 	Fastest,
 	HalfHour,
 	Hour,
+	Economy,
 	Minimum,
 }
 impl Default for FeeType {

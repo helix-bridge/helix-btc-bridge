@@ -27,20 +27,20 @@ static SECP256K1: Lazy<Secp256k1<All>> = Lazy::new(Secp256k1::new);
 
 #[derive(Debug)]
 pub struct XTxBuilder<'a> {
-	pub amount: Satoshi,
-	pub fee_rate: Satoshi,
 	pub network: Network,
+	pub fee_rate: Satoshi,
 	pub sender: &'a TaprootKey,
-	pub recipient: &'a str,
 	pub utxos: &'a [Utxo],
+	pub recipient: &'a str,
 	pub x_target: XTarget,
+	pub amount: Satoshi,
 }
 impl XTxBuilder<'_> {
 	const LOCK_TIME: LockTime = LockTime::ZERO;
 	const VERSION: Version = Version::TWO;
 
 	pub fn build(self) -> Result<String> {
-		let Self { amount, fee_rate, sender, network, recipient, utxos, x_target } = self;
+		let Self { network, fee_rate, sender, utxos, recipient, x_target, amount } = self;
 		let recipient_addr = util::addr_from_str(recipient, network)?;
 		let mark = x_target.encode()?;
 		let mut input_count = 1;
@@ -152,9 +152,9 @@ impl XTxBuilder<'_> {
 
 #[derive(Debug)]
 pub struct TaprootKey {
-	pub address: String,
 	pub keypair: Keypair,
 	pub script_public_key: ScriptBuf,
+	pub address: String,
 }
 impl TaprootKey {
 	pub fn from_untweaked_keypair(keypair: Keypair, network: Network) -> Self {
@@ -163,6 +163,6 @@ impl TaprootKey {
 		let keypair = keypair.tap_tweak(&SECP256K1, None).to_inner();
 		let script_public_key = address.script_pubkey();
 
-		Self { address: address.to_string(), keypair, script_public_key }
+		Self { keypair, script_public_key, address: address.to_string() }
 	}
 }

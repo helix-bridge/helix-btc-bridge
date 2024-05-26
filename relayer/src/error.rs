@@ -21,7 +21,11 @@ pub enum Error {
 	#[error(transparent)]
 	Bitcoin(#[from] BitcoinError),
 	#[error(transparent)]
+	DeadpoolSqlite(#[from] DeadpoolSqliteError),
+	#[error(transparent)]
 	Reqwest(#[from] reqwest::Error),
+	#[error(transparent)]
+	Rusqlite(#[from] rusqlite::Error),
 	#[error(transparent)]
 	Secp256k1(#[from] bitcoin::secp256k1::Error),
 	#[error(transparent)]
@@ -45,4 +49,14 @@ pub enum BitcoinError {
 	Parse(#[from] bitcoin::address::ParseError),
 	#[error(transparent)]
 	SigHashTapRoot(#[from] bitcoin::sighash::TaprootError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeadpoolSqliteError {
+	#[error(transparent)]
+	Create(#[from] deadpool_sqlite::CreatePoolError),
+	#[error(transparent)]
+	Interact(#[from] deadpool_sqlite::InteractError),
+	#[error(transparent)]
+	Pool(#[from] deadpool_sqlite::PoolError),
 }

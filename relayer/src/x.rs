@@ -5,13 +5,17 @@ use crate::prelude::*;
 
 // TODO?: `Encode` and `Decode` traits.
 
+pub trait X {
+	const ID: Id;
+}
+
 #[cfg_attr(test, derive(PartialEq))]
 #[derive(Debug)]
-pub enum Entity {
+pub enum XEntity {
 	Address20([u8; 20]),
 	Address32([u8; 32]),
 }
-impl Entity {
+impl XEntity {
 	const LENGTH_MARKER_SIZE: usize = 1;
 
 	pub fn from_bytes<S>(s: S) -> Result<Self>
@@ -30,8 +34,8 @@ impl Entity {
 
 	pub fn as_bytes(&self) -> &[u8] {
 		match self {
-			Entity::Address20(v) => v,
-			Entity::Address32(v) => v,
+			XEntity::Address20(v) => v,
+			XEntity::Address32(v) => v,
 		}
 	}
 
@@ -39,13 +43,13 @@ impl Entity {
 		let mut v = Vec::new();
 
 		match self {
-			Entity::Address20(a) => {
+			XEntity::Address20(a) => {
 				v.push(a.len() as _);
 				v.extend_from_slice(a);
 
 				v
 			},
-			Entity::Address32(a) => {
+			XEntity::Address32(a) => {
 				v.push(a.len() as _);
 				v.extend_from_slice(a);
 
@@ -63,11 +67,11 @@ impl Entity {
 		debug_assert_eq!(Self::LENGTH_MARKER_SIZE, 1);
 
 		let e = match s[0] {
-			20 => Entity::Address20(
+			20 => XEntity::Address20(
 				array_bytes::slice2array(&s[Self::LENGTH_MARKER_SIZE..])
 					.map_err(Error::ArrayBytes)?,
 			),
-			32 => Entity::Address32(
+			32 => XEntity::Address32(
 				array_bytes::slice2array(&s[Self::LENGTH_MARKER_SIZE..])
 					.map_err(Error::ArrayBytes)?,
 			),
@@ -77,12 +81,12 @@ impl Entity {
 		Ok(e)
 	}
 }
-impl From<[u8; 20]> for Entity {
+impl From<[u8; 20]> for XEntity {
 	fn from(value: [u8; 20]) -> Self {
 		Self::Address20(value)
 	}
 }
-impl From<[u8; 32]> for Entity {
+impl From<[u8; 32]> for XEntity {
 	fn from(value: [u8; 32]) -> Self {
 		Self::Address32(value)
 	}
@@ -143,7 +147,7 @@ impl From<[u8; 4]> for Id {
 #[derive(Debug)]
 pub struct XTarget {
 	pub id: Id,
-	pub entity: Entity,
+	pub entity: XEntity,
 }
 impl XTarget {
 	pub fn encode(&self) -> Result<PushBytesBuf> {
@@ -167,7 +171,7 @@ impl XTarget {
 	{
 		let s = s.as_ref();
 		let id = Id::decode(&s[..Id::SIZE])?;
-		let entity = Entity::decode(&s[Id::SIZE..])?;
+		let entity = XEntity::decode(&s[Id::SIZE..])?;
 
 		Ok(Self { id, entity })
 	}
@@ -196,7 +200,7 @@ fn x_target_codec_should_work() {
 	]
 	.iter()
 	.for_each(|&(id, entity, expected_encoded)| {
-		let xt = XTarget { id, entity: Entity::from_bytes(entity).unwrap() };
+		let xt = XTarget { id, entity: XEntity::from_bytes(entity).unwrap() };
 		let encoded = xt.encode().unwrap();
 		let encoded = encoded.as_bytes();
 

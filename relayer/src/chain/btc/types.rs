@@ -27,7 +27,7 @@ pub struct Utxo {
 #[cfg(test)]
 impl Utxo {
 	pub(crate) fn new(value: Satoshi) -> Self {
-		Self { value, outpoint: OutPoint { txid: Txid::all_zeros(), vout: 0 } }
+		Self { outpoint: OutPoint { txid: Txid::all_zeros(), vout: 0 }, value }
 	}
 }
 #[cfg(test)]

@@ -7,15 +7,15 @@ use crate::chain::btc::{api::mempool::FeeType, types::*};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Conf {
-	pub fee_conf: FeeConf,
 	pub network: Network,
-	pub secret_key: String,
+	pub vault_secret_key: String,
+	pub fee_conf: FeeConf,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct FeeConf {
+	pub strategy: FeeType,
 	pub extra: Satoshi,
 	pub force: Option<Satoshi>,
-	pub strategy: FeeType,
 }

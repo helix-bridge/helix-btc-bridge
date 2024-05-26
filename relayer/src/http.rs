@@ -83,7 +83,10 @@ where
 		match serde_json::from_slice(s) {
 			Ok(d) => Ok(d),
 			Err(e) => {
-				tracing::error!("{}", String::from_utf8_lossy(s));
+				tracing::error!(
+					"failed to deserialize the following response into an object\n{}",
+					String::from_utf8_lossy(s)
+				);
 
 				Err(e)?
 			},

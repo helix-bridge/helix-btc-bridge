@@ -3,103 +3,148 @@ mod btc;
 // std
 use std::{
 	fmt::Debug,
+	path::PathBuf,
+	sync::Arc,
 	thread::{self, ScopedJoinHandle},
 	time::Duration,
 };
+// crates.io
+use app_dirs2::AppDataType;
+use tokio::runtime::Runtime;
 // self
-use crate::{conf::*, prelude::*};
+use crate::{conf::*, prelude::*, sql, APP_INFO};
 
-trait Relayer
+trait Relay
 where
 	Self: Debug + Send + Sync,
 {
 	fn name(&self) -> &'static str;
 
-	fn init(&self) -> Result<()> {
-		Ok(())
-	}
+	// fn init(&self) -> Result<()> {
+	// 	Ok(())
+	// }
 
-	fn run(&self) -> Result<()>;
+	fn run(&self, runtime: Arc<Runtime>) -> Result<()>;
 
-	fn start(&self) -> Result<()> {
-		self.init()?;
-		self.run()?;
+	fn start(&self, runtime: Arc<Runtime>) -> Result<()> {
+		// self.init()?;
+		self.run(runtime)?;
 
 		Ok(())
 	}
 }
 
 #[derive(Debug)]
-struct RelayerPool {
-	btc_relayer: btc::Relayer,
-	other_relayers: Vec<Box<dyn Relayer>>,
+struct Service {
+	runtime: Arc<Runtime>,
+	relayers: Vec<Box<dyn Relay>>,
 }
-impl RelayerPool {
-	fn load() -> Result<Self> {
-		let p = Conf::default_path()?;
+impl Service {
+	fn conf_path() -> Result<PathBuf> {
+		Ok(app_dirs2::app_root(AppDataType::UserConfig, &APP_INFO)?.join("conf.toml"))
+	}
 
-		match Conf::load_from(&p)?.try_into() {
-			Ok(r) => Ok(r),
-			r => {
+	fn sql_path() -> Result<PathBuf> {
+		Ok(app_dirs2::app_root(AppDataType::UserData, &APP_INFO)?.join("data.db3"))
+	}
+
+	fn register_components() -> Result<Runtime> {
+		let rt = Runtime::new()?;
+		let p = Self::sql_path()?;
+
+		rt.block_on(async {
+			sql::init(&p).await.map_err(|e| {
 				tracing::error!(
-					"an error occurred while parsing the configuration, \
-					please check the {p:?}",
+					"an error occurred while initializing the database, please check {p:?}",
 				);
 
-				r
-			},
-		}
-	}
-}
-impl TryFrom<Conf> for RelayerPool {
-	type Error = Error;
+				e
+			})
+		})?;
 
-	fn try_from(value: Conf) -> Result<Self> {
-		Ok(Self { btc_relayer: btc::Relayer::try_from(value.btc)?, other_relayers: Vec::new() })
+		Ok(rt)
+	}
+
+	fn register_relayers() -> Result<Vec<Box<dyn Relay>>> {
+		let p = Self::conf_path()?;
+		let c = Conf::load_from(&p)?;
+		let rs = vec![btc::Relayer::try_from(c.btc).map(|r| Box::new(r) as Box<dyn Relay>)]
+			.into_iter()
+			.collect::<Result<_>>()
+			.map_err(|e| {
+				tracing::error!(
+					"an error occurred while parsing the configuration, please check {p:?}",
+				);
+
+				e
+			})?;
+
+		Ok(rs)
+	}
+
+	fn init() -> Result<Self> {
+		let rt = Self::register_components()?;
+		let relayers = Self::register_relayers()?;
+
+		Ok(Self { runtime: Arc::new(rt), relayers })
 	}
 }
 
 pub fn run() -> Result<()> {
-	let pool = RelayerPool::load()?;
-	let RelayerPool { btc_relayer, other_relayers } = &pool;
+	let Service { runtime, relayers } = Service::init()?;
 
 	thread::scope::<_, Result<()>>(|s| {
-		let mut btc_rt = Some(s.spawn(move || btc_relayer.start()));
-		let mut others_rt =
-			other_relayers.iter().map(|r| Some(s.spawn(move || r.start()))).collect::<Vec<_>>();
+		let mut threads =
+			relayers.iter().map(|r| Some(s.spawn(|| r.start(runtime.clone())))).collect::<Vec<_>>();
 
-		loop {
-			btc_rt = supervise(btc_relayer, btc_rt.take(), |r| s.spawn(|| r.start()))?;
+		while !threads.is_empty() {
+			let mut i = 0;
 
-			for (i, t) in others_rt.iter_mut().enumerate() {
-				*t = supervise(&*other_relayers[i], t.take(), |r| s.spawn(|| r.start()))?;
+			while i < threads.len() {
+				let r = &*relayers[i];
+				let t = supervise(r, threads[i].take(), |r| s.spawn(|| r.start(runtime.clone())))?;
+
+				if t.is_some() {
+					threads[i] = t;
+					i += 1;
+				} else {
+					threads.remove(i);
+
+					tracing::info!("{} service has completed", r.name());
+				}
 			}
 
 			thread::sleep(Duration::from_millis(200));
 		}
+
+		Ok(())
 	})?;
 
 	Ok(())
 }
 
-fn supervise<'a, 'b, F>(
-	relayer: &'a dyn Relayer,
-	thread: Option<ScopedJoinHandle<'b, Result<()>>>,
+fn supervise<'a, F>(
+	relayer: &'a dyn Relay,
+	thread: Option<ScopedJoinHandle<'a, Result<()>>>,
 	restart_fn: F,
-) -> Result<Option<ScopedJoinHandle<'b, Result<()>>>>
+) -> Result<Option<ScopedJoinHandle<'a, Result<()>>>>
 where
-	'a: 'b,
-	F: FnOnce(&'a dyn Relayer) -> ScopedJoinHandle<'b, Result<()>>,
+	F: FnOnce(&'a dyn Relay) -> ScopedJoinHandle<'a, Result<()>>,
 {
 	if let Some(t) = thread {
 		if t.is_finished() {
-			if let Err(e) = t.join().map_err(Error::Any)? {
-				tracing::error!("an error occurred while running {}: {e:?}", relayer.name());
+			match t.join().map_err(Error::Any)? {
+				Ok(_) => Ok(None),
+				Err(e) => {
+					tracing::error!("an error occurred while running {}: {e:?}", relayer.name());
 
-				return Ok(Some(restart_fn(relayer)));
+					Ok(Some(restart_fn(relayer)))
+				},
 			}
+		} else {
+			Ok(Some(t))
 		}
+	} else {
+		Ok(thread)
 	}
-
-	Ok(None)
 }
