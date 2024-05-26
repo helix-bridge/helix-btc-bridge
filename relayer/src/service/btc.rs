@@ -2,20 +2,22 @@
 use std::sync::Arc;
 // crates.io
 use bitcoin::Network;
+use deadpool_sqlite::Pool;
 use reqwest::ClientBuilder;
-use tokio::runtime::Runtime;
 // self
-use super::Relay;
+use super::{Context, Relay};
 use crate::{
 	chain::btc::{api::mempool::Api, *},
 	conf::btc::*,
 	http::Client,
 	prelude::*,
+	sql::Sql,
 	x::*,
 };
 
 #[derive(Debug)]
 pub(super) struct Relayer {
+	context: Context,
 	api: Api<Client>,
 	network: Network,
 	vault: TaprootKey,
@@ -24,10 +26,28 @@ pub(super) struct Relayer {
 impl Relayer {
 	const NAME: &'static str = "helix-btc-relayer";
 
+	pub fn init(conf: Conf, context: Context) -> Result<Self> {
+		let Conf { network, vault_secret_key, fee_conf } = conf;
+		let api = Api {
+			http: Client(ClientBuilder::new().user_agent(Self::NAME).build()?),
+			base_uri: if matches!(network, Network::Testnet) {
+				"https://mempool.space/testnet/api"
+			} else {
+				"https://mempool.space/api"
+			},
+		};
+		let vault = TaprootKey::from_untweaked_keypair(
+			vault_secret_key.trim_start_matches("0x").parse()?,
+			network,
+		);
+
+		Ok(Self { context, api, network, vault, fee_conf })
+	}
+
 	// For testing.
 	#[allow(unused)]
 	async fn transfer(&self) -> Result<()> {
-		let Relayer { api, network, vault, fee_conf } = self;
+		let Relayer { context, api, network, vault, fee_conf } = self;
 		let fee_rate = api.get_recommended_fee().await?.of(fee_conf.strategy) + fee_conf.extra;
 
 		tracing::info!("fee rate: {fee_rate}");
@@ -54,51 +74,32 @@ impl Relayer {
 		Ok(())
 	}
 
-	async fn watch(&self) -> Result<()> {
-		let txs = self.api.get_addr_txs_chain(&self.vault.address, None::<&str>).await?;
+	// async fn watch(&self) -> Result<()> {
+	// 	let txs = self.api.get_addr_txs_chain(&self.vault.address, None::<&str>).await?;
 
-		Ok(())
-	}
-}
-impl TryFrom<Conf> for Relayer {
-	type Error = Error;
-
-	fn try_from(conf: Conf) -> Result<Self> {
-		let Conf { network, vault_secret_key, fee_conf } = conf;
-		let api = Api {
-			http: Client(ClientBuilder::new().user_agent(Self::NAME).build()?),
-			base_uri: if matches!(network, Network::Testnet) {
-				"https://mempool.space/testnet/api"
-			} else {
-				"https://mempool.space/api"
-			},
-		};
-		let vault = TaprootKey::from_untweaked_keypair(
-			vault_secret_key.trim_start_matches("0x").parse()?,
-			network,
-		);
-
-		Ok(Self { api, network, vault, fee_conf })
-	}
+	// 	Ok(())
+	// }
 }
 impl X for Relayer {
 	const ID: Id = Id(0);
+}
+impl Sql for Relayer {
+	async fn pool(&self) -> &Arc<Pool> {
+		&self.context.sql
+	}
 }
 impl Relay for Relayer {
 	fn name(&self) -> &'static str {
 		Self::NAME
 	}
 
-	fn run(&self, runtime: Arc<Runtime>) -> Result<()> {
+	fn start(&self) -> Result<()> {
 		tracing::info!("running {}", self.name());
 
 		let self_static: &'static _ = unsafe { &*(self as *const Self) };
 
-		runtime.block_on(async move {
-			self_static.watch().await?;
-
-			// loop {
-			// }
+		self.context.runtime.block_on(async move {
+			loop {}
 
 			Ok::<(), Error>(())
 		})?;

@@ -10,6 +10,7 @@ use std::{
 };
 // crates.io
 use app_dirs2::AppDataType;
+use deadpool_sqlite::Pool;
 use tokio::runtime::Runtime;
 // self
 use crate::{conf::*, prelude::*, sql, APP_INFO};
@@ -20,23 +21,11 @@ where
 {
 	fn name(&self) -> &'static str;
 
-	// fn init(&self) -> Result<()> {
-	// 	Ok(())
-	// }
-
-	fn run(&self, runtime: Arc<Runtime>) -> Result<()>;
-
-	fn start(&self, runtime: Arc<Runtime>) -> Result<()> {
-		// self.init()?;
-		self.run(runtime)?;
-
-		Ok(())
-	}
+	fn start(&self) -> Result<()>;
 }
 
 #[derive(Debug)]
 struct Service {
-	runtime: Arc<Runtime>,
 	relayers: Vec<Box<dyn Relay>>,
 }
 impl Service {
@@ -48,27 +37,28 @@ impl Service {
 		Ok(app_dirs2::app_root(AppDataType::UserData, &APP_INFO)?.join("data.db3"))
 	}
 
-	fn register_components() -> Result<Runtime> {
+	fn register_context() -> Result<Context> {
 		let rt = Runtime::new()?;
-		let p = Self::sql_path()?;
-
-		rt.block_on(async {
-			sql::init(&p).await.map_err(|e| {
+		let p = rt.block_on(async {
+			let p = Self::sql_path()?;
+			let p = sql::init(&p).await.map_err(|e| {
 				tracing::error!(
 					"an error occurred while initializing the database, please check {p:?}",
 				);
 
 				e
-			})
+			})?;
+
+			Ok::<_, Error>(p)
 		})?;
 
-		Ok(rt)
+		Ok(Context { runtime: Arc::new(rt), sql: Arc::new(p) })
 	}
 
-	fn register_relayers() -> Result<Vec<Box<dyn Relay>>> {
+	fn register_relayers(context: Context) -> Result<Vec<Box<dyn Relay>>> {
 		let p = Self::conf_path()?;
 		let c = Conf::load_from(&p)?;
-		let rs = vec![btc::Relayer::try_from(c.btc).map(|r| Box::new(r) as Box<dyn Relay>)]
+		let rs = vec![btc::Relayer::init(c.btc, context).map(|r| Box::new(r) as Box<dyn Relay>)]
 			.into_iter()
 			.collect::<Result<_>>()
 			.map_err(|e| {
@@ -83,26 +73,31 @@ impl Service {
 	}
 
 	fn init() -> Result<Self> {
-		let rt = Self::register_components()?;
-		let relayers = Self::register_relayers()?;
+		let context = Self::register_context()?;
+		let relayers = Self::register_relayers(context)?;
 
-		Ok(Self { runtime: Arc::new(rt), relayers })
+		Ok(Self { relayers })
 	}
 }
 
+#[derive(Clone, Debug)]
+struct Context {
+	runtime: Arc<Runtime>,
+	sql: Arc<Pool>,
+}
+
 pub fn run() -> Result<()> {
-	let Service { runtime, relayers } = Service::init()?;
+	let Service { relayers } = Service::init()?;
 
 	thread::scope::<_, Result<()>>(|s| {
-		let mut threads =
-			relayers.iter().map(|r| Some(s.spawn(|| r.start(runtime.clone())))).collect::<Vec<_>>();
+		let mut threads = relayers.iter().map(|r| Some(s.spawn(|| r.start()))).collect::<Vec<_>>();
 
 		while !threads.is_empty() {
 			let mut i = 0;
 
 			while i < threads.len() {
 				let r = &*relayers[i];
-				let t = supervise(r, threads[i].take(), |r| s.spawn(|| r.start(runtime.clone())))?;
+				let t = supervise(r, threads[i].take(), |r| s.spawn(|| r.start()))?;
 
 				if t.is_some() {
 					threads[i] = t;

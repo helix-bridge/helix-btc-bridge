@@ -1,9 +1,8 @@
 // std
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 // crates.io
 use chrono::{DateTime, Utc};
 use deadpool_sqlite::{Config, Object, Pool, Runtime::Tokio1};
-use once_cell::sync::OnceCell;
 use rusqlite::{
 	types::{FromSql, FromSqlResult, ToSql, ToSqlOutput, ValueRef},
 	Connection,
@@ -12,21 +11,18 @@ use uuid::Uuid;
 // self
 use crate::{prelude::*, x::*};
 
-static SQL: OnceCell<Pool> = OnceCell::new();
+pub trait Sql {
+	async fn pool(&self) -> &Arc<Pool>;
 
-pub trait Sql
-where
-	Self: X,
-{
-	async fn acquire_sql() -> Result<Object> {
-		Ok(unsafe { SQL.get_unchecked() }.get().await.map_err(DeadpoolSqliteError::Pool)?)
+	async fn sql(&self) -> Result<Object> {
+		Ok(self.pool().await.get().await.map_err(DeadpoolSqliteError::Pool)?)
 	}
 
-	async fn interact<F>(f: F) -> Result<usize>
+	async fn interact<F>(&self, f: F) -> Result<usize>
 	where
 		F: 'static + Send + FnOnce(&Connection) -> rusqlite::Result<usize>,
 	{
-		Self::acquire_sql()
+		self.sql()
 			.await?
 			.interact(|sql| Ok(f(sql)?))
 			.await
@@ -34,13 +30,13 @@ where
 	}
 
 	async fn get(&self) -> Result<XRecord> {
-		Self::acquire_sql().await?;
+		self.sql().await?;
 
 		todo!()
 	}
 
 	async fn insert(&self, record: XRecord) -> Result<usize> {
-		Self::interact(move |sql| {
+		self.interact(move |sql| {
 			sql.execute(
 				"INSERT OR REPLACE INTO x_records (\
 					id,\
@@ -69,7 +65,6 @@ where
 		.await
 	}
 }
-impl<T> Sql for T where T: X {}
 
 #[derive(Debug)]
 pub struct XRecord {
@@ -95,18 +90,18 @@ impl ToSql for Id {
 	}
 }
 
-pub async fn init<P>(path: P) -> Result<()>
+pub async fn init<P>(path: P) -> Result<Pool>
 where
 	P: AsRef<Path>,
 {
-	let pool =
-		Config::new(path.as_ref()).create_pool(Tokio1).map_err(DeadpoolSqliteError::Create)?;
+	let p = Config::new(path.as_ref()).create_pool(Tokio1).map_err(DeadpoolSqliteError::Create)?;
 
-	let sql = pool.get().await.map_err(DeadpoolSqliteError::Pool)?;
-
-	sql.interact(|sql| {
-		sql.execute(
-			"CREATE TABLE IF NOT EXISTS x_records (\
+	p.get()
+		.await
+		.map_err(DeadpoolSqliteError::Pool)?
+		.interact(|sql| {
+			sql.execute(
+				"CREATE TABLE IF NOT EXISTS x_records (\
 				id BLOB PRIMARY KEY,\
 				source INTEGER NOT NULL,\
 				sender TEXT NOT NULL,\
@@ -117,13 +112,11 @@ where
 				created_at TEXT NOT NULL,\
 				finished_at TEXT\
 			)",
-			[],
-		)
-	})
-	.await
-	.map_err(DeadpoolSqliteError::Interact)??;
+				[],
+			)
+		})
+		.await
+		.map_err(DeadpoolSqliteError::Interact)??;
 
-	SQL.set(pool).unwrap();
-
-	Ok(())
+	Ok(p)
 }
