@@ -21,7 +21,16 @@ where
 {
 	fn name(&self) -> &'static str;
 
-	fn start(&self) -> Result<()>;
+	fn init(&self) -> Result<()>;
+
+	fn run(&self) -> Result<()>;
+
+	fn start(&self) -> Result<()> {
+		self.init()?;
+		self.run()?;
+
+		Ok(())
+	}
 }
 
 #[derive(Debug)]
@@ -58,7 +67,7 @@ impl Service {
 	fn register_relayers(context: Context) -> Result<Vec<Box<dyn Relay>>> {
 		let p = Self::conf_path()?;
 		let c = Conf::load_from(&p)?;
-		let rs = vec![btc::Relayer::init(c.btc, context).map(|r| Box::new(r) as Box<dyn Relay>)]
+		let rs = vec![btc::Relayer::new(c.btc, context).map(|r| Box::new(r) as Box<dyn Relay>)]
 			.into_iter()
 			.collect::<Result<_>>()
 			.map_err(|e| {
@@ -72,7 +81,7 @@ impl Service {
 		Ok(rs)
 	}
 
-	fn init() -> Result<Self> {
+	fn new() -> Result<Self> {
 		let context = Self::register_context()?;
 		let relayers = Self::register_relayers(context)?;
 
@@ -87,7 +96,7 @@ struct Context {
 }
 
 pub fn run() -> Result<()> {
-	let Service { relayers } = Service::init()?;
+	let Service { relayers } = Service::new()?;
 
 	thread::scope::<_, Result<()>>(|s| {
 		let mut threads = relayers.iter().map(|r| Some(s.spawn(|| r.start()))).collect::<Vec<_>>();

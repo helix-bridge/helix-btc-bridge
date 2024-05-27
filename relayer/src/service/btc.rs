@@ -1,9 +1,10 @@
 // std
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 // crates.io
 use bitcoin::Network;
 use deadpool_sqlite::Pool;
 use reqwest::ClientBuilder;
+use tokio::time;
 // self
 use super::{Context, Relay};
 use crate::{
@@ -24,9 +25,7 @@ pub(super) struct Relayer {
 	fee_conf: FeeConf,
 }
 impl Relayer {
-	const NAME: &'static str = "helix-btc-relayer";
-
-	pub fn init(conf: Conf, context: Context) -> Result<Self> {
+	pub fn new(conf: Conf, context: Context) -> Result<Self> {
 		let Conf { network, vault_secret_key, fee_conf } = conf;
 		let api = Api {
 			http: Client(ClientBuilder::new().user_agent(Self::NAME).build()?),
@@ -74,14 +73,16 @@ impl Relayer {
 		Ok(())
 	}
 
-	// async fn watch(&self) -> Result<()> {
-	// 	let txs = self.api.get_addr_txs_chain(&self.vault.address, None::<&str>).await?;
+	async fn watch(&self) -> Result<()> {
+		let txid = self.get_latest().await?.map(|xr| xr.txid).unwrap_or_default();
+		let txs = self.api.get_addr_txs_chain(&self.vault.address, None::<&str>).await?;
 
-	// 	Ok(())
-	// }
+		Ok(())
+	}
 }
 impl X for Relayer {
 	const ID: Id = Id(0);
+	const NAME: &'static str = "btc-x";
 }
 impl Sql for Relayer {
 	async fn pool(&self) -> &Arc<Pool> {
@@ -93,16 +94,33 @@ impl Relay for Relayer {
 		Self::NAME
 	}
 
-	fn start(&self) -> Result<()> {
+	fn init(&self) -> Result<()> {
+		self.context.runtime.block_on(async {
+			<Self as Sql>::init(self).await?;
+
+			Ok::<_, Error>(())
+		})?;
+
+		Ok(())
+	}
+
+	fn run(&self) -> Result<()> {
 		tracing::info!("running {}", self.name());
 
 		let self_static: &'static _ = unsafe { &*(self as *const Self) };
+		let r: Result<()> = self.context.runtime.block_on(async move {
+			let mut interval = time::interval(Duration::from_millis(1_000));
 
-		self.context.runtime.block_on(async move {
-			loop {}
+			loop {
+				tokio::select! {
+					_ = interval.tick() => {
+						self_static.watch().await?;
+					}
+				}
+			}
+		});
 
-			Ok::<(), Error>(())
-		})?;
+		r?;
 
 		Ok(())
 	}

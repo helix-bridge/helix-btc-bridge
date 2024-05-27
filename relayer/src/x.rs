@@ -7,6 +7,7 @@ use crate::prelude::*;
 
 pub trait X {
 	const ID: Id;
+	const NAME: &'static str;
 }
 
 #[cfg_attr(test, derive(PartialEq))]

@@ -13,6 +13,8 @@ pub enum Error {
 	Any(Box<dyn 'static + std::any::Any + Send>),
 	#[error(transparent)]
 	Io(#[from] std::io::Error),
+	#[error(transparent)]
+	ParseInt(#[from] std::num::ParseIntError),
 
 	#[error(transparent)]
 	AppDirs2(#[from] app_dirs2::AppDirsError),
