@@ -4,13 +4,16 @@ pub use api::*;
 pub mod chain;
 pub use chain::*;
 
+pub mod service;
+pub use service::*;
+
 pub mod x;
 pub use x::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-	#[error("{0:?}")]
-	Any(Box<dyn 'static + std::any::Any + Send>),
+	// #[error("{0:?}")]
+	// Any(Box<dyn 'static + std::any::Any + Send>),
 	#[error(transparent)]
 	Io(#[from] std::io::Error),
 	#[error(transparent)]
@@ -33,12 +36,16 @@ pub enum Error {
 	#[error(transparent)]
 	SerdeJson(#[from] serde_json::Error),
 	#[error(transparent)]
+	Tokio(#[from] tokio::task::JoinError),
+	#[error(transparent)]
 	Toml(#[from] toml::de::Error),
 
 	#[error(transparent)]
 	Api(#[from] ApiError),
 	#[error(transparent)]
 	Chain(#[from] ChainError),
+	#[error(transparent)]
+	Servcie(#[from] ServiceError),
 	#[error(transparent)]
 	X(#[from] XError),
 }

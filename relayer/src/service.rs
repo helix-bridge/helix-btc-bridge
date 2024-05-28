@@ -1,19 +1,18 @@
 mod btc;
 
 // std
-use std::{
-	fmt::Debug,
-	path::PathBuf,
-	sync::Arc,
-	thread::{self, ScopedJoinHandle},
-	time::Duration,
-};
+use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 // crates.io
-use app_dirs2::AppDataType;
+use app_dirs2::{AppDataType, AppInfo};
 use deadpool_sqlite::Pool;
-use tokio::runtime::Runtime;
+use tokio::{
+	runtime::{Builder, Runtime},
+	task, time,
+};
 // self
-use crate::{conf::*, prelude::*, sql, APP_INFO};
+use crate::{conf::*, prelude::*, sql};
+
+const APP_INFO: AppInfo = AppInfo { name: "helix-btc-bridge-relayer", author: "Xavier Lau" };
 
 trait Relay
 where
@@ -35,6 +34,7 @@ where
 
 #[derive(Debug)]
 struct Service {
+	context: Context,
 	relayers: Vec<Box<dyn Relay>>,
 }
 impl Service {
@@ -47,18 +47,19 @@ impl Service {
 	}
 
 	fn register_context() -> Result<Context> {
-		let rt = Runtime::new()?;
-		let p = rt.block_on(async {
-			let p = Self::sql_path()?;
-			let p = sql::init(&p).await.map_err(|e| {
-				tracing::error!(
-					"an error occurred while initializing the database, please check {p:?}",
-				);
+		let rt = Builder::new_multi_thread()
+			.enable_all()
+			// TODO: Need more tests.
+			// Increare this if there is a new relayer.
+			.worker_threads(1)
+			.build()?;
+		let p = Self::sql_path()?;
+		let p = sql::init(&p).map_err(|e| {
+			tracing::error!(
+				"an error occurred while initializing the database, please check {p:?}",
+			);
 
-				e
-			})?;
-
-			Ok::<_, Error>(p)
+			e
 		})?;
 
 		Ok(Context { runtime: Arc::new(rt), sql: Arc::new(p) })
@@ -83,9 +84,9 @@ impl Service {
 
 	fn new() -> Result<Self> {
 		let context = Self::register_context()?;
-		let relayers = Self::register_relayers(context)?;
+		let relayers = Self::register_relayers(context.clone())?;
 
-		Ok(Self { relayers })
+		Ok(Self { context, relayers })
 	}
 }
 
@@ -96,59 +97,51 @@ struct Context {
 }
 
 pub fn run() -> Result<()> {
-	let Service { relayers } = Service::new()?;
+	let Service { context, relayers } = Service::new()?;
 
-	thread::scope::<_, Result<()>>(|s| {
-		let mut threads = relayers.iter().map(|r| Some(s.spawn(|| r.start()))).collect::<Vec<_>>();
+	context.runtime.block_on(async {
+		let mut tasks = relayers
+			.iter()
+			.map(|r| {
+				let r = unsafe { &*(&**r as *const dyn Relay) };
 
-		while !threads.is_empty() {
-			let mut i = 0;
+				task::spawn(async { r.start() })
+			})
+			.collect::<Vec<_>>();
 
-			while i < threads.len() {
-				let r = &*relayers[i];
-				let t = supervise(r, threads[i].take(), |r| s.spawn(|| r.start()))?;
+		loop {
+			let mut finished = 0;
 
-				if t.is_some() {
-					threads[i] = t;
-					i += 1;
-				} else {
-					threads.remove(i);
+			for i in 0..tasks.len() {
+				let r = unsafe { &*(&*relayers[i] as *const dyn Relay) };
+				let t = &mut tasks[i];
 
-					tracing::info!("{} service has completed", r.name());
+				if t.is_finished() {
+					match t.await? {
+						Ok(_) => {
+							tracing::info!("{} service has completed", r.name());
+
+							finished += 1;
+						},
+						Err(e) => {
+							tracing::error!("an error occurred while running {}: {e:?}", r.name());
+
+							tasks[i] = task::spawn(async { r.start() });
+						},
+					}
 				}
 			}
 
-			thread::sleep(Duration::from_millis(200));
+			if finished == tasks.len() {
+				break;
+			}
+
+			time::sleep(Duration::from_millis(5_000)).await;
 		}
+
+		// Terminate all async tasks as we are about to shut down the tokio runtime reactor here.
+		context.sql.close();
 
 		Ok(())
-	})?;
-
-	Ok(())
-}
-
-fn supervise<'a, F>(
-	relayer: &'a dyn Relay,
-	thread: Option<ScopedJoinHandle<'a, Result<()>>>,
-	restart_fn: F,
-) -> Result<Option<ScopedJoinHandle<'a, Result<()>>>>
-where
-	F: FnOnce(&'a dyn Relay) -> ScopedJoinHandle<'a, Result<()>>,
-{
-	if let Some(t) = thread {
-		if t.is_finished() {
-			match t.join().map_err(Error::Any)? {
-				Ok(_) => Ok(None),
-				Err(e) => {
-					tracing::error!("an error occurred while running {}: {e:?}", relayer.name());
-
-					Ok(Some(restart_fn(relayer)))
-				},
-			}
-		} else {
-			Ok(Some(t))
-		}
-	} else {
-		Ok(thread)
-	}
+	})
 }

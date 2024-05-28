@@ -22,61 +22,55 @@ where
 
 	async fn interact<F, T>(&self, f: F) -> Result<T>
 	where
-		F: 'static + Send + FnOnce(&Connection) -> rusqlite::Result<T>,
+		F: 'static + Send + FnOnce(&Connection) -> Result<T>,
 		T: 'static + Send,
 	{
-		self.sql()
-			.await?
-			.interact(|sql| Ok(f(sql)?))
-			.await
-			.map_err(DeadpoolSqliteError::Interact)?
+		self.sql().await?.interact(|sql| f(sql)).await.map_err(DeadpoolSqliteError::Interact)?
 	}
 
 	async fn init(&self) -> Result<()> {
 		self.interact(move |sql| {
 			sql.execute(
 				&format!(
-					"CREATE TABLE IF NOT EXISTS {} (\
+					"CREATE TABLE IF NOT EXISTS [{}] (\
 					id INTEGER PRIMARY KEY AUTOINCREMENT,\
+					block_height INTEGER NOT NULL,\
 					txid TEXT NOT NULL,\
-					source INTEGER NOT NULL,\
-					sender TEXT NOT NULL,\
 					target INTEGER NOT NULL,\
 					recipient TEXT NOT NULL,\
-					amount INTEGER NOT NULL,\
+					amount TEXT NOT NULL,\
 					hash TEXT,\
-					created_at TEXT NOT NULL,\
-					finished_at TEXT\
+					created_at DATETIME NOT NULL,\
+					finished_at DATETIME\
 				)",
 					Self::NAME
 				),
-				[],
-			)
-		})
-		.await?;
+				(),
+			)?;
 
-		Ok(())
+			Ok(())
+		})
+		.await
 	}
 
 	async fn get_latest(&self) -> Result<Option<XRecord>> {
-		let Some((txid, source, sender, target, recipient, amount, hash, created_at, finished_at)) =
+		let Some((block_height, txid, target, recipient, amount, hash, created_at, finished_at)) =
 			self.interact(move |sql| {
-				let mut stmt = sql.prepare(&format!(
-					"SELECT * FROM {} WHERE source = ? ORDER BY id DESC LIMIT 1",
-					Self::NAME,
-				))?;
+				let mut stmt = sql
+					.prepare(
+						&format!("SELECT * FROM [{}] ORDER BY id DESC LIMIT 1", Self::NAME,),
+					)?;
 				let maybe_xr = stmt
-					.query_row(rusqlite::params![Self::ID], |r| {
+					.query_row((), |r| {
 						Ok((
 							r.get(1)?,
 							r.get(2)?,
 							r.get(3)?,
 							r.get(4)?,
-							r.get(5)?,
-							r.get::<_, String>(6)?,
+							r.get::<_, String>(5)?,
+							r.get(6)?,
 							r.get(7)?,
 							r.get(8)?,
-							r.get(9)?,
 						))
 					})
 					.optional()?;
@@ -88,9 +82,8 @@ where
 			return Ok(None);
 		};
 		let xr = XRecord {
+			block_height,
 			txid,
-			source,
-			sender,
 			target,
 			recipient,
 			amount: amount.parse()?,
@@ -102,35 +95,39 @@ where
 		Ok(Some(xr))
 	}
 
-	async fn insert(&self, record: XRecord) -> Result<usize> {
-		self.interact(move |sql| {
-			sql.execute(
-				&format!(
-					"INSERT OR REPLACE INTO {} (\
-						txid,\
-						source,\
-						sender,\
-						target,\
-						recipient,\
-						amount,\
-						hash,\
-						created_at,\
-						finished_at\
-					) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-					Self::NAME
-				),
-				rusqlite::params![
-					record.txid,
-					record.source,
-					record.sender,
-					record.target,
-					record.recipient,
-					record.amount.to_string(),
-					record.hash,
-					record.created_at,
-					record.finished_at
-				],
-			)
+	async fn insert(&self, records: Vec<XRecord>) -> Result<()> {
+		self.interact(move |c| {
+			let sql = format!(
+				"INSERT OR REPLACE INTO [{}] (\
+				block_height,\
+				txid,\
+				target,\
+				recipient,\
+				amount,\
+				hash,\
+				created_at,\
+				finished_at\
+			) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+				Self::NAME
+			);
+
+			records.into_iter().try_for_each(|r| {
+				c.execute(
+					&sql,
+					rusqlite::params![
+						r.block_height,
+						r.txid,
+						r.target,
+						r.recipient,
+						r.amount.to_string(),
+						r.hash,
+						r.created_at,
+						r.finished_at
+					],
+				)?;
+
+				Ok(())
+			})
 		})
 		.await
 	}
@@ -138,9 +135,8 @@ where
 
 #[derive(Debug)]
 pub struct XRecord {
+	pub block_height: u64,
 	pub txid: String,
-	pub source: Id,
-	pub sender: String,
 	pub target: Id,
 	pub recipient: String,
 	pub amount: u128,
@@ -160,7 +156,7 @@ impl ToSql for Id {
 	}
 }
 
-pub async fn init<P>(path: P) -> Result<Pool>
+pub fn init<P>(path: P) -> Result<Pool>
 where
 	P: AsRef<Path>,
 {

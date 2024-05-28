@@ -106,6 +106,10 @@ impl Http for Client {
 	where
 		U: IntoUrl,
 	{
+		let u = uri.as_str();
+
+		tracing::info!("GET {u}");
+
 		Ok(self.0.get(uri).send().await?.bytes().await?)
 	}
 
@@ -114,6 +118,10 @@ impl Http for Client {
 		U: IntoUrl,
 		B: Into<Body>,
 	{
+		let u = uri.as_str();
+
+		tracing::info!("POST {u}");
+
 		Ok(self.0.post(uri).body(body).send().await?.bytes().await?)
 	}
 }

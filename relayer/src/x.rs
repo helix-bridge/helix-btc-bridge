@@ -6,7 +6,6 @@ use crate::prelude::*;
 // TODO?: `Encode` and `Decode` traits.
 
 pub trait X {
-	const ID: Id;
 	const NAME: &'static str;
 }
 
@@ -19,6 +18,8 @@ pub enum XEntity {
 impl XEntity {
 	const LENGTH_MARKER_SIZE: usize = 1;
 
+	// TODO
+	#[allow(unused)]
 	pub fn from_bytes<S>(s: S) -> Result<Self>
 	where
 		S: AsRef<[u8]>,
@@ -40,6 +41,8 @@ impl XEntity {
 		}
 	}
 
+	// TODO
+	#[allow(unused)]
 	fn encode(&self) -> Vec<u8> {
 		let mut v = Vec::new();
 

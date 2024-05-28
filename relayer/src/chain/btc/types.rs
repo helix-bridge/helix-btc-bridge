@@ -15,7 +15,7 @@ fn max_btc_in_u64_should_work() {
 	assert!(max_u64 > max_btc);
 }
 
-// pub type BlockNumber = u32;
+pub type BlockNumber = u32;
 pub type Index = u32;
 
 #[cfg_attr(test, derive(PartialEq))]

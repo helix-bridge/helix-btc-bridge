@@ -52,7 +52,7 @@ impl XTxBuilder<'_> {
 		let mut input_count = 1;
 		let (utxos, input, output, fee) = loop {
 			// Assume there is always a transfer output, a charge output, and a mark output.
-			let (tx_size, v_size) = util::estimate_tx_size(input_count, 2, op_return.size());
+			let (tx_size, v_size) = util::estimate_tx_size(input_count, 2, op_return.size() as _);
 
 			tracing::info!("estimated tx size: {tx_size}");
 			tracing::info!("estimated tx virtual size: {v_size}");

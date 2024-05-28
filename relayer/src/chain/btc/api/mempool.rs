@@ -54,7 +54,7 @@ where
 	{
 		let utxos = self
 			.http
-			.get_with_reties(format!("{}/address/{}/utxo", self.base_uri, address.as_ref()), 3, 50)
+			.get_with_reties(format!("{}/address/{}/utxo", self.base_uri, address.as_ref()), 3, 1_000)
 			.await?
 			.json::<Vec<Utxo>>()?;
 
@@ -63,6 +63,8 @@ where
 		Ok(utxos)
 	}
 
+	// TODO
+	#[allow(unused)]
 	pub async fn get_utxos_confirmed<S>(&self, address: S) -> Result<Vec<Utxo>>
 	where
 		S: AsRef<str>,
@@ -79,7 +81,7 @@ where
 	pub async fn get_recommended_fee(&self) -> Result<Fees> {
 		let fees = self
 			.http
-			.get_with_reties(format!("{}/v1/fees/recommended", self.base_uri), 3, 50)
+			.get_with_reties(format!("{}/v1/fees/recommended", self.base_uri), 3, 1_000)
 			.await?
 			.json::<Fees>()?;
 
@@ -113,24 +115,25 @@ pub struct Tx {
 	// pub weight: u32,
 	// pub sigops: u32,
 	// pub fee: Satoshi,
-	// pub status: Status,
+	pub status: Status,
 }
 // #[derive(Debug, Deserialize)]
 // pub struct Vin {
-// 		pub txid: String,
-// 		pub vout: Index,
-// 		pub prevout: Vout,
-// 		pub scriptsig: String,
-// 		pub scriptsig_asm: String,
-// 		pub witness: Vec<String>,
+// 	pub txid: String,
+// 	pub vout: Index,
+// 	pub prevout: Vout,
+// 	pub scriptsig: String,
+// 	pub scriptsig_asm: String,
+// 	pub witness: Vec<String>,
 // 	pub is_coinbase: bool,
 // 	pub sequence: u32,
 // }
 #[derive(Debug, Deserialize)]
 pub struct Vout {
-	// 	pub scriptpubkey: String,
+	// pub scriptpubkey: String,
 	pub scriptpubkey_asm: String,
-	// 	pub scriptpubkey_type: String,
+	// TODO: use enum type.
+	pub scriptpubkey_type: String,
 	pub scriptpubkey_address: Option<String>,
 	pub value: Satoshi,
 }
@@ -145,7 +148,7 @@ pub struct Utxo {
 #[derive(Debug, Deserialize)]
 pub struct Status {
 	pub confirmed: bool,
-	// 	pub block_height: BlockNumber,
+	pub block_height: BlockNumber,
 	// 	pub block_hash: String,
 	// 	pub block_time: u64,
 }
