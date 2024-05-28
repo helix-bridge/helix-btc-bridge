@@ -42,16 +42,17 @@ impl XTxBuilder<'_> {
 	pub fn build(self) -> Result<String> {
 		let Self { network, fee_rate, sender, utxos, recipient, x_target, amount } = self;
 		let recipient_addr = util::addr_from_str(recipient, network)?;
-		let mark = x_target.encode()?;
+		let op_return = TxOut {
+			script_pubkey: Script::builder()
+				.push_opcode(OP_RETURN)
+				.push_slice(x_target.encode()?)
+				.into_script(),
+			value: Amount::ZERO,
+		};
 		let mut input_count = 1;
 		let (utxos, input, output, fee) = loop {
 			// Assume there is always a transfer output, a charge output, and a mark output.
-			let (tx_size, v_size) = util::estimate_tx_size(
-				input_count,
-				2,
-				// OP_RETURN base.
-				1 + 83 + Amount::SIZE as Satoshi,
-			);
+			let (tx_size, v_size) = util::estimate_tx_size(input_count, 2, op_return.size());
 
 			tracing::info!("estimated tx size: {tx_size}");
 			tracing::info!("estimated tx virtual size: {v_size}");
@@ -75,13 +76,7 @@ impl XTxBuilder<'_> {
 						script_pubkey: recipient_addr.script_pubkey(),
 						value: Amount::from_sat(amount),
 					},
-					TxOut {
-						script_pubkey: Script::builder()
-							.push_opcode(OP_RETURN)
-							.push_slice(mark)
-							.into_script(),
-						value: Amount::ZERO,
-					},
+					op_return,
 				];
 
 				if charge != 0 {
