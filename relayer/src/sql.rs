@@ -1,5 +1,5 @@
 // std
-use std::{path::Path, sync::Arc};
+use std::{iter::Iterator, path::Path, sync::Arc};
 // crates.io
 use chrono::{DateTime, Utc};
 use deadpool_sqlite::{Config, Object, Pool, Runtime::Tokio1};
@@ -95,7 +95,10 @@ where
 		Ok(Some(xr))
 	}
 
-	async fn insert(&self, records: Vec<XRecord>) -> Result<()> {
+	async fn insert<I>(&self, mut records: I) -> Result<()>
+	where
+		I: 'static + Send + Iterator<Item = XRecord>,
+	{
 		self.interact(move |c| {
 			let sql = format!(
 				"INSERT OR REPLACE INTO [{}] (\
@@ -111,7 +114,7 @@ where
 				Self::NAME
 			);
 
-			records.into_iter().try_for_each(|r| {
+			records.try_for_each(|r| {
 				c.execute(
 					&sql,
 					rusqlite::params![

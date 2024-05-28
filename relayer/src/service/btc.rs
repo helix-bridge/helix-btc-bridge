@@ -96,21 +96,26 @@ impl Relayer {
 					break 'outter;
 				}
 
-				let mut vout = None;
+				let mut value = 0;
+				let mut xt = None;
 
 				for v in tx.vout {
+					// TODO: more types.
+					if v.scriptpubkey_type == "scriptpubkey_type"
+						&& v.scriptpubkey_address
+							.map(|a| a == self.vault.address)
+							.unwrap_or_default()
+					{
+						value += v.value;
+					}
 					if v.scriptpubkey_type == "op_return" {
-						vout = Some(v);
+						xt = Some(v.scriptpubkey_asm);
 
 						break;
 					}
 				}
 
-				let Some(vout) = vout else {
-					// Not a valid cross-chain tx.
-					continue;
-				};
-				let Ok(xt) = util::extract_xtarget(vout.scriptpubkey_asm) else {
+				let Some(xt) = xt.and_then(|xt| util::extract_xtarget(xt).ok()) else {
 					// Not a valid cross-chain tx.
 					continue;
 				};
@@ -120,12 +125,13 @@ impl Relayer {
 					txid: tx.txid.clone(),
 					target: xt.id,
 					recipient: array_bytes::bytes2hex("0x", xt.entity.as_bytes()),
-					amount: vout.value as _,
+					amount: value as _,
 					hash: None,
 					created_at: Utc::now(),
 					finished_at: None,
 				});
 
+				// TODO: improve log.
 				tracing::info!("x record found: {}", tx.txid);
 
 				after = Some(tx.txid);
@@ -139,7 +145,9 @@ impl Relayer {
 			time::sleep(Duration::from_millis(1_000)).await;
 		}
 
-		self.insert(xrs).await?;
+		// Iterate through txs in reverse order to ensure the later tx has a larger id when
+		// inserting into the DB.
+		self.insert(xrs.into_iter().rev()).await?;
 
 		Ok(())
 	}

@@ -41,7 +41,7 @@ impl XTxBuilder<'_> {
 
 	pub fn build(self) -> Result<String> {
 		let Self { network, fee_rate, sender, utxos, recipient, x_target, amount } = self;
-		let recipient_addr = util::addr_from_str(recipient, network)?;
+		let recipient_spk = util::addr_from_str(recipient, network)?.script_pubkey();
 		let op_return = TxOut {
 			script_pubkey: Script::builder()
 				.push_opcode(OP_RETURN)
@@ -72,10 +72,7 @@ impl XTxBuilder<'_> {
 					.map(|u| TxIn { previous_output: u.outpoint, ..Default::default() })
 					.collect::<Vec<_>>();
 				let mut output = vec![
-					TxOut {
-						script_pubkey: recipient_addr.script_pubkey(),
-						value: Amount::from_sat(amount),
-					},
+					TxOut { script_pubkey: recipient_spk, value: Amount::from_sat(amount) },
 					op_return,
 				];
 
